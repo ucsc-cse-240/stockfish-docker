@@ -5,6 +5,8 @@
 readonly THIS_DIR="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd | xargs realpath)"
 readonly ROOT_DIR="${THIS_DIR}/.."
 
+readonly IMAGE_NAME="${IMAGE_NAME:-stockfish-engine}"
+
 readonly START_FEN="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 readonly MATE_FEN="r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5Q2/PPPP1PPP/RNB1K2R w KQkq - 4 4"
 readonly MATE_MOVE="Qxf7"
@@ -12,7 +14,7 @@ readonly MATE_MOVE="Qxf7"
 function test_standard_opening() {
     echo -n "Standard Opening ... "
     local output
-    output=$(docker run --rm stockfish-analyzer "$START_FEN" "e4, e5" --depth 10 2>/dev/null) || true
+    output=$(docker run --rm "$IMAGE_NAME" "$START_FEN" "e4, e5" --depth 10 2>/dev/null) || true
     
     if echo "$output" | grep -q "\"final_rating\""; then
         echo "ok"
@@ -26,7 +28,7 @@ function test_standard_opening() {
 function test_checkmate_detection() {
     echo -n "Checkmate Detection ... "
     local mate_output
-    mate_output=$(docker run --rm stockfish-analyzer "$MATE_FEN" "$MATE_MOVE" --depth 10 2>/dev/null) || true
+    mate_output=$(docker run --rm "$IMAGE_NAME" "$MATE_FEN" "$MATE_MOVE" --depth 10 2>/dev/null) || true
     
     if echo "$mate_output" | grep -q "\"rating\": \"M0\""; then
         echo "ok"
@@ -40,7 +42,7 @@ function test_checkmate_detection() {
 function test_invalid_move_handling() {
     echo -n "Invalid Move Handling ... "
     local error_output
-    error_output=$(docker run --rm stockfish-analyzer "$START_FEN" "NotAMove" --depth 5 2>/dev/null) || true
+    error_output=$(docker run --rm "$IMAGE_NAME" "$START_FEN" "NotAMove" --depth 5 2>/dev/null) || true
     
     if echo "$error_output" | grep -q "Invalid move"; then
         echo "ok"
