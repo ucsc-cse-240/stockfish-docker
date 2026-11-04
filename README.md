@@ -1,28 +1,46 @@
 # Stockfish Chess Game Analyzer (Docker)
 
-A [Docker](https://en.wikipedia.org/wiki/Docker_(software)) image to compile and run the [Stockfish](https://github.com/official-stockfish/Stockfish) engine for playing chess.
+A [Docker](https://en.wikipedia.org/wiki/Docker_(software)) image that compiles a pinned [Stockfish](https://github.com/official-stockfish/Stockfish) engine and analyzes chess positions and PGNs.
+The engine binary is installed only inside the image at `/usr/bin/stockfish`; callers do not provide an engine binary or path.
 
 ## Running
 
-The docker image is fairly standard:
-
-You can build an image with teh tag `stockfish-engine`
+Build an image with the tag `stockfish-engine`:
 
 `docker build -t stockfish-engine .`
 
-Once built, the container 
-Run the container by passing a FEN string, an optional comma-separated list of moves.
+### FEN mode
 
-`docker run --rm stockfish-engine "<FEN>" "<MOVES>"`
+Pass a FEN string and, optionally, a comma-separated list of SAN moves.
+The container writes a JSON object to stdout.
+
+`docker run --rm stockfish-engine "<FEN>" "<MOVES>" --depth 15`
 
 ### Example:
 
 `docker run --rm stockfish-engine "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" "e4,e5,Nf3"`
 
+### Batch PGN mode
+
+Omit the FEN to analyze every `.pgn` file recursively under `/games`.
+Mount the tournament output directory read/write because successful PGNs are rewritten in place.
+
+```
+docker run --rm --user "$(id -u):$(id -g)" -v "$TOURNAMENT_OUTPUT:/games" stockfish-engine --depth 15
+```
+
+The command writes a machine-readable JSON summary to stdout.
+`--user "$(id -u):$(id -g)"` preserves ownership of rewritten host files.
+It continues after individual file failures and exits nonzero if any file failed.
+An empty mount also exits nonzero unless `--allow-empty` is passed.
+
+Every game in a multi-game PGN is supported.
+Only its played mainline is analyzed; variations are preserved but not evaluated.
+
 ## Understanding the Output
 
-The `rating` field provides the engine's evaluation of the position:
-* Integers (Centipawns): A value of 100 is roughly equivalent to a 1-pawn advantage for White. 
+The `rating` fields provide the engine's evaluation of a position from White's perspective:
+* Integers (Centipawns): A value of 100 is roughly equivalent to a 1-pawn advantage for White.
   Positive values favor White; negative values favor Black.
 * Mate String (M#): When a forced checkmate is detected, the rating switches to a string format:
   * `M1`: White has a forced checkmate in 1 move.
@@ -45,9 +63,30 @@ The container returns a JSON object to stdout, which can be redirected to a file
 } 
 ```
 
+## PGN annotations
+
+Batch mode adds or replaces the `ChessAIStockfishAnalysis` PGN header.
+Its value is compact JSON, escaped as required by PGN tags.
+The object contains this schema:
+
+```json
+{
+  "schema_version": 1,
+  "score_perspective": "white",
+  "engine": {"name": "Stockfish", "commit": "<pinned image commit>"},
+  "depth": 15,
+  "ratings": [20, 31, "M3"]
+}
+```
+
+`ratings[0]` is the initial position.
+`ratings[n]` is the position after mainline ply `n`.
+Integers are signed centipawns; mate values use the `M<n>` form described above.
+Re-running the container replaces the existing header rather than accumulating annotations.
+
 ## Licensing
 
-This repository is provided under the MIT license (see [LICENSE](https://github.com/ucsc-cse-240/stockfish-docker/blob/main/LICENSE)). 
+This repository is provided under the MIT license (see [LICENSE](https://github.com/ucsc-cse-240/stockfish-docker/blob/main/LICENSE)).
 Stockfish is covered under the [GPL-3](https://github.com/official-stockfish/Stockfish/blob/master/Copying.txt).
 This project does not distribute the source or binary of Stockfish,
 but does reference a specific Git commit hash to compile it as part of the Docker image.

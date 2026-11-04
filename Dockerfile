@@ -18,6 +18,9 @@ RUN make -j build
 # --- STAGE 2: The Final Image ---
 FROM python:3.12-alpine3.20
 
+ARG STOCKFISH_COMMIT=f8aa78e0a7e8853370e5989fc23783f3b244ac42
+ENV STOCKFISH_COMMIT=${STOCKFISH_COMMIT}
+
 # Install only the runtime libraries Stockfish needs
 RUN apk add --no-cache libstdc++ libgcc
 
@@ -30,5 +33,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir python-chess==1.1
 
 COPY scripts/entrypoint.py .
+RUN chmod 755 /app/entrypoint.py
 
-ENTRYPOINT ["python", "entrypoint.py"]
+VOLUME ["/games"]
+
+ENTRYPOINT ["python", "/app/entrypoint.py"]
