@@ -1,3 +1,6 @@
+ARG PYTHON_CHESS_VERSION=1.1
+ARG CHESSAI_VERSION=0.0.5
+
 # --- STAGE 1: The Builder ---
 FROM python:3.12-alpine3.20 AS builder
 
@@ -19,6 +22,8 @@ RUN make -j build
 FROM python:3.12-alpine3.20
 
 ARG STOCKFISH_COMMIT=f8aa78e0a7e8853370e5989fc23783f3b244ac42
+ARG PYTHON_CHESS_VERSION
+ARG CHESSAI_VERSION
 ENV STOCKFISH_COMMIT=${STOCKFISH_COMMIT}
 
 # Install only the runtime libraries Stockfish needs
@@ -30,7 +35,9 @@ COPY --from=builder /src/src/stockfish /usr/bin/stockfish
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir python-chess==1.1
+RUN pip install --no-cache-dir \
+    python-chess==${PYTHON_CHESS_VERSION} \
+    ucsc-chessai==${CHESSAI_VERSION}
 
 COPY scripts/entrypoint.py .
 RUN chmod 755 /app/entrypoint.py
