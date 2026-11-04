@@ -107,9 +107,11 @@ def analyze_fen(engine: chess.engine.SimpleEngine, fen: str, moves: str | None,
         'initial_fen': fen,
         'config': {'depth': depth_limit},
     }
+
     output['initial_rating'] = get_rating_value(engine, board, depth_limit)
     output['analysis_steps'] = get_moveline_ratings(engine, board, depth_limit, moves)
     output['final_rating'] = get_rating_value(engine, board, depth_limit)
+
     return output
 
 def _annotation(ratings: list[Rating], depth_limit: int) -> str:
@@ -153,19 +155,21 @@ def _write_atomically(path: str, contents: str) -> None:
     """ Replace a file only after all its replacement contents have been written. """
 
     directory = os.path.dirname(path)
-    descriptor, temporary_path = tempfile.mkstemp(prefix = '.stockfish-analysis-', dir = directory,
-                                                 text = True)
+    descriptor, temporary_path = tempfile.mkstemp(prefix = '.stockfish-analysis-',
+            dir = directory, text = True)
+
     try:
         with os.fdopen(descriptor, 'w', encoding = 'utf-8') as file:
             file.write(contents)
+
         os.replace(temporary_path, path)
     except Exception:
         if (os.path.exists(temporary_path)):
             os.unlink(temporary_path)
         raise
 
-def _analyze_pgn_file(engine: chess.engine.SimpleEngine, path: str,
-                      depth_limit: int) -> int:
+def _analyze_pgn_file(engine: chess.engine.SimpleEngine,
+        path: str, depth_limit: int) -> int:
     """ Analyze every game in one PGN file and return its game count. """
 
     games: list[chess.pgn.Game] = []
@@ -174,6 +178,7 @@ def _analyze_pgn_file(engine: chess.engine.SimpleEngine, path: str,
             game = chess.pgn.read_game(file)
             if (game is None):
                 break
+
             _analyze_game(engine, game, depth_limit)
             games.append(game)
 
@@ -182,6 +187,7 @@ def _analyze_pgn_file(engine: chess.engine.SimpleEngine, path: str,
 
     contents = '\n\n'.join(str(game).strip() for game in games) + '\n'
     _write_atomically(path, contents)
+
     return len(games)
 
 def _find_pgn_files() -> list[str]:
@@ -193,10 +199,11 @@ def _find_pgn_files() -> list[str]:
         for filename in sorted(filenames):
             if (filename.lower().endswith('.pgn')):
                 paths.append(os.path.join(root, filename))
+
     return paths
 
 def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
-                  allow_empty: bool) -> tuple[dict[str, typing.Any], int]:
+        allow_empty: bool) -> tuple[dict[str, typing.Any], int]:
     """ Analyze mounted PGNs, returning a JSON summary and process exit code. """
 
     paths = _find_pgn_files()
@@ -208,6 +215,7 @@ def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
         'files_failed': 0,
         'files': [],
     }
+
     if ((len(paths) == 0) and (not allow_empty)):
         summary['error'] = f'No .pgn files found under {GAMES_DIR!r}. Mount games there or pass --allow-empty.'
         return (summary, 1)
@@ -227,6 +235,7 @@ def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
     exit_code = 0
     if (summary['files_failed'] > 0):
         exit_code = 1
+
     return (summary, exit_code)
 
 def _get_parser() -> argparse.ArgumentParser:
@@ -234,40 +243,58 @@ def _get_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description = 'Analyze a FEN or all mounted PGNs using the bundled Stockfish engine.')
+
     parser.add_argument('fen', nargs = '?', default = None,
                         help = 'FEN to analyze. Omit to analyze all PGNs under /games.')
+
     parser.add_argument('moves', nargs = '?', default = None,
                         help = 'Optional comma-separated SAN moves to play after FEN analysis.')
+
     parser.add_argument('--depth', type = int, default = DEFAULT_DEPTH_LIMIT,
                         help = 'Stockfish search depth per position (default: %(default)s).')
+
     parser.add_argument('--allow-empty', action = 'store_true',
                         help = 'Allow batch mode to succeed when /games contains no PGNs.')
+
     return parser
+
+def display_output(output: str) -> None:
+    print(json.dumps(output, indent = 4))
+
+def display_error(error_message: str) -> None:
+    print(json.dumps({'error': error_message}))
 
 def main() -> None:
     """ Run the requested FEN or mounted-PGN analysis mode. """
 
     args = _get_parser().parse_args()
     if (args.depth < 1):
-        print(json.dumps({'error': '--depth must be at least 1.'}))
-        sys.exit(2)
+        display_error('--depth must be at least 1.')
+        return 2
 
     try:
         engine = init_engine()
+
+        output = None
+        exit_code = 0
         try:
             if (args.fen is not None):
                 output = analyze_fen(engine, args.fen, args.moves, args.depth)
-                exit_code = 0
             else:
                 (output, exit_code) = analyze_batch(engine, args.depth, args.allow_empty)
-        finally:
-            engine.quit()
-    except (OSError, ValueError, chess.engine.EngineError, chess.engine.EngineTerminatedError) as error:
-        print(json.dumps({'error': str(error)}))
-        sys.exit(1)
+        except Exception as ex:
+            display_error(str(ex))
+            return 1
 
-    print(json.dumps(output, indent = 2))
-    sys.exit(exit_code)
+        display_output(output)
+        return exit_code
+    except Exception:
+        display_error('Failed to initialize engine.')
+        return 1
+    finally:
+        engine.quit()
+
+    return exit_code
 
 if (__name__ == '__main__'):
-    main()
+    sys.exit(main())
