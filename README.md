@@ -7,25 +7,31 @@ The engine binary is installed only inside the image at `/usr/bin/stockfish`; ca
 
 Build an image with the tag `stockfish-engine`:
 
-`docker build -t stockfish-engine .`
+```sh
+docker build -t stockfish-engine .
+```
 
 ### FEN mode
 
 Pass a FEN string and, optionally, a comma-separated list of SAN moves.
 The container writes a JSON object to stdout.
 
-`docker run --rm stockfish-engine "<FEN>" "<MOVES>" --depth 15`
+```sh
+docker run --rm stockfish-engine "<FEN>" "<MOVES>" --depth 15
+```
 
-### Example:
+For example, we can analyze the starting board with three simple moves played:
 
-`docker run --rm stockfish-engine "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" "e4,e5,Nf3"`
+```sh
+docker run --rm stockfish-engine "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" "e4,e5,Nf3"
+```
 
 ### Batch PGN mode
 
 Omit the FEN to analyze every `.pgn` file recursively under `/games`.
 Mount the tournament output directory read/write because successful PGNs are rewritten in place.
 
-```
+```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$TOURNAMENT_OUTPUT:/games" stockfish-engine --depth 15
 ```
 
@@ -51,7 +57,7 @@ The `rating` fields provide the engine's evaluation of a position from White's p
 
 The container returns a JSON object to stdout, which can be redirected to a file.
 
-``` 
+``` json
 {
     "initial_fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
     "config": { "depth": 15 },
@@ -85,14 +91,14 @@ The object contains this schema:
 }
 ```
 
-`annotations[0]` is the initial position; each later annotation is the position after its
-mainline ply. Numeric evaluations are signed pawns; mate values use the `M<n>` form.
+`annotations[0]` is the initial position; each later annotation is the position after its mainline ply.
+Numeric evaluations are signed pawns; mate values use the `M<n>` form.
 Each annotation also includes a short, student-facing `description` of that rating.
 Re-running the container replaces the existing header rather than accumulating annotations.
 
 The Dockerfile defines `PYTHON_CHESS_VERSION` and `CHESSAI_VERSION` at its top.
-Use `--build-arg` to override either pin when building an image; `CHESSAI_VERSION`
-must name a ChessAI release that includes the game-rating annotation API.
+Use `--build-arg` to override either pin when building an image;
+`CHESSAI_VERSION` must name a ChessAI release that includes the game-rating annotation API (i.e., `CHESSAI_VERSION >= 0.0.5`).
 
 ## Licensing
 
