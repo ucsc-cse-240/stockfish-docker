@@ -1,3 +1,4 @@
+# TODO: Maybe make it a single stage build
 ARG PYTHON_CHESS_VERSION=1.1
 ARG CHESSAI_VERSION=0.0.5
 
@@ -35,6 +36,7 @@ COPY --from=builder /src/src/stockfish /usr/bin/stockfish
 
 WORKDIR /app
 
+# TODO: Consider not importing chessai and just make sure the output is correct.
 RUN pip install --no-cache-dir \
     python-chess==${PYTHON_CHESS_VERSION} \
     ucsc-chessai==${CHESSAI_VERSION}
