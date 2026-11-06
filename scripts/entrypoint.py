@@ -22,25 +22,16 @@ import chessai.core.gameannotation
 DEFAULT_DEPTH_LIMIT = 15
 GAMES_DIR = '/games'
 STOCKFISH_PATH = '/usr/bin/stockfish'
-Rating = float | str
+
+RatingScore: typing.TypeAlias = float
+MateScore: typing.TypeAlias = str
+MoveError: typing.TypeAlias = str
+Rating: typing.TypeAlias = RatingScore | MateScore | MoveError
 
 class AnalysisConfig(typing.TypedDict):
     """ The Stockfish settings used for one analysis request. """
 
     depth: int
-
-class MoveAnalysisStep(typing.TypedDict):
-    """ The evaluation after a valid SAN move. """
-
-    move: str
-    rating: Rating
-    description: str
-
-class MoveAnalysisError(typing.TypedDict):
-    """ A move that could not be applied to the requested position. """
-
-    move: str
-    error: str
 
 class FenAnalysis(typing.TypedDict):
     """ The JSON response for a FEN analysis request. """
@@ -48,10 +39,8 @@ class FenAnalysis(typing.TypedDict):
     initial_fen: str
     config: AnalysisConfig
     initial_rating: Rating
-    initial_description: str
-    analysis_steps: list[MoveAnalysisStep | MoveAnalysisError]
+    analysis_steps: list[Rating]
     final_rating: Rating
-    final_description: str
 
 class BatchFileResult(typing.TypedDict):
     """ The common fields in a result for one PGN file. """
@@ -59,21 +48,17 @@ class BatchFileResult(typing.TypedDict):
     path: str
     status: str
 
-
 class BatchFileSuccess(BatchFileResult):
     """ A PGN file that was completely annotated and rewritten. """
 
     games_analyzed: int
-
 
 class BatchFileFailure(BatchFileResult):
     """ A PGN file that could not be annotated without changing it. """
 
     error: str
 
-
 BatchFileOutcome: typing.TypeAlias = BatchFileSuccess | BatchFileFailure
-
 
 class BatchAnalysis(typing.TypedDict):
     """ The JSON response for a batch PGN analysis request. """
