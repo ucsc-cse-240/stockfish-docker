@@ -17,8 +17,8 @@ function test_standard_opening() {
     local output
     output=$(docker run --rm "$IMAGE_NAME" "$START_FEN" "e4, e5" --depth 10 2>/dev/null) || true
     
-    if echo "$output" | grep -q '"initial_description"' \
-            && echo "$output" | grep -q '"description"' \
+    if echo "$output" | grep -q '"initial_rating"' \
+            && echo "$output" | grep -q '"analysis_steps"' \
             && echo "$output" | grep -q '"final_rating"'; then
         echo "ok"
         return 0
@@ -87,7 +87,8 @@ function test_batch_annotation() {
     if echo "$output" | grep -q '"files_succeeded": 1' \
             && grep -q 'ChessAIStockfishAnalysis' "$temp_dir/nested/game.pgn" \
             && grep -q 'score_perspective' "$temp_dir/nested/game.pgn" \
-            && grep -q 'description' "$temp_dir/nested/game.pgn"; then
+            && grep -q '"ply"' "$temp_dir/nested/game.pgn" \
+            && ! grep -q 'description' "$temp_dir/nested/game.pgn"; then
         echo "ok"
         return 0
     else

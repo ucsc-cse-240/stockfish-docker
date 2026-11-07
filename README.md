@@ -62,12 +62,10 @@ The container returns a JSON object to stdout, which can be redirected to a file
     "initial_fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
     "config": { "depth": 15 },
     "initial_rating": 0.52,
-    "initial_description": "White is slightly better",
     "analysis_steps": [
-        { "move": "Bb5", "rating": 0.45, "description": "White is slightly better" }
+        0.45
     ],
-    "final_rating": 0.45,
-    "final_description": "White is slightly better"
+    "final_rating": 0.45
 } 
 ```
 
@@ -79,26 +77,24 @@ The object contains this schema:
 
 ```json
 {
-  "schema_version": "0.0.5",
   "score_perspective": "white",
   "engine": {"name": "Stockfish", "commit": "<pinned image commit>"},
   "depth": 15,
   "annotations": [
-    {"ply": 0, "rating": 0.2, "description": "The position is about equal", "move": null},
-    {"ply": 1, "rating": 0.31, "description": "White is slightly better", "move": "e2e4"},
-    {"ply": 2, "rating": "M3", "description": "White has a forced checkmate in 3 moves", "move": "e7e5"}
+    0.2,
+    0.31,
+    "M3",
   ]
 }
 ```
 
 `annotations[0]` is the initial position; each later annotation is the position after its mainline ply.
 Numeric evaluations are signed pawns; mate values use the `M<n>` form.
-Each annotation also includes a short, student-facing `description` of that rating.
 Re-running the container replaces the existing header rather than accumulating annotations.
 
-The Dockerfile defines `PYTHON_CHESS_VERSION` and `CHESSAI_VERSION` at its top.
-Use `--build-arg` to override either pin when building an image;
-`CHESSAI_VERSION` must name a ChessAI release that includes the game-rating annotation API (i.e., `CHESSAI_VERSION >= 0.0.5`).
+The Dockerfile defines `PYTHON_CHESS_VERSION` at its top. Use `--build-arg` to override
+that pin when building an image. The container does not install ChessAI; it writes the
+versioned JSON schema that ChessAI's game-rating annotation converter consumes.
 
 ## Licensing
 

@@ -9,7 +9,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import stat
 import sys
 import tempfile
@@ -18,7 +17,6 @@ import typing
 import chess
 import chess.engine
 import chess.pgn
-import chessai.core.gameannotation
 
 DEFAULT_DEPTH_LIMIT = 15
 GAMES_DIR = '/games'
@@ -28,8 +26,7 @@ GAME_RATING_ANNOTATION_HEADER: str = 'ChessAIStockfishAnalysis'
 
 RatingScore: typing.TypeAlias = float
 MateScore: typing.TypeAlias = str
-MoveError: typing.TypeAlias = str
-Rating: typing.TypeAlias = RatingScore | MateScore | MoveError
+Rating: typing.TypeAlias = RatingScore | MateScore
 
 class AnalysisConfig(typing.TypedDict):
     """ The Stockfish settings used for one analysis request. """
@@ -44,6 +41,20 @@ class FenAnalysis(typing.TypedDict):
     initial_rating: Rating
     analysis_steps: list[Rating]
     final_rating: Rating
+
+class RatingEngine(typing.TypedDict):
+    """ The engine that produced an annotation. """
+
+    name: str
+    commit: str
+
+class GameRatingAnnotation(typing.TypedDict):
+    """ The JSON schema stored in ChessAI's custom PGN header. """
+
+    score_perspective: str
+    engine: RatingEngine
+    depth: int
+    ratings: list[Rating]
 
 class BatchFileResult(typing.TypedDict):
     """ The common fields in a result for one PGN file. """
@@ -106,7 +117,7 @@ def get_rating_value(engine: chess.engine.SimpleEngine, board: chess.Board,
 
     centipawns = score.score()
     if (centipawns is None):
-        logging.error('Stockfish returned a score without a centipawn value.')
+        raise chess.engine.EngineError('Stockfish returned a score without a centipawn value.')
 
     return round(centipawns / 100, 2)
 
@@ -123,7 +134,7 @@ def get_moveline_ratings(
     if (moves is None):
         return []
 
-    steps_history: list[MoveAnalysisStep | MoveAnalysisError] = []
+    steps_history: list[Rating] = []
 
     # Parse the movelist string.
     move_list: list[str] = []
@@ -152,14 +163,10 @@ def get_moveline_ratings(
     return steps_history
 
 def analyze_fen(engine: chess.engine.SimpleEngine, fen: str, moves: str | None,
-                depth_limit: int) -> (FenAnalysis | None, int):
+                depth_limit: int) -> FenAnalysis:
     """ Analyze one FEN and its optional comma-separated SAN move line. """
 
-    try:
-        board = chess.Board(fen)
-    except ValueError as error:
-        logging.exception(f"Invalid FEN string provided: {fen!r}", exc_info = error)
-        return None, 1
+    board = chess.Board(fen)
 
     output: FenAnalysis = {
         'initial_fen': fen,
@@ -174,40 +181,42 @@ def analyze_fen(engine: chess.engine.SimpleEngine, fen: str, moves: str | None,
     move_ratings = get_moveline_ratings(engine, board, depth_limit, moves)
     output['analysis_steps'] = move_ratings
 
-    if ((len(move_ratings) > 0) and ('rating' in move_ratings[-1])):
-        final_step = typing.cast(MoveAnalysisStep, move_ratings[-1])
-        output['final_rating'] = final_step['rating']
+    if ((len(move_ratings) > 0)
+            and (not isinstance(move_ratings[-1], str)
+                 or not move_ratings[-1].startswith('Invalid move:'))):
+        output['final_rating'] = move_ratings[-1]
     else:
         output['final_rating'] = output['initial_rating']
 
-    return output, 0
+    return output
 
 def _annotation(ratings: list[Rating], depth_limit: int) -> str:
-    """ Build the compact JSON stored in an analyzed PGN's custom header. """
+    """ Build a compact, ChessAI-compatible JSON PGN header value. """
 
-    annotation = {
+    annotation: GameRatingAnnotation = {
+        'score_perspective': 'white',
         'engine': {
             'name': 'Stockfish',
             'commit': os.environ.get('STOCKFISH_COMMIT', 'unknown'),
         },
         'depth': depth_limit,
-        'annotations': ratings,
+        'ratings': ratings,
     }
 
     return json.dumps(annotation, separators = (',', ':'))
 
 def _analyze_game(engine: chess.engine.SimpleEngine, game: chess.pgn.Game,
-                  depth_limit: int) -> int:
+                  depth_limit: int) -> None:
     """ Add a White-relative rating series to one PGN game's custom header. """
 
     if (len(game.errors) > 0):
-        logging.error(f"PGN parser errors: {game.errors[0]}.")
+        raise ValueError(f"PGN parser error: {game.errors[0]}")
 
     if ((game.headers.get('Event') == '?')
             and (game.headers.get('Site') == '?')
             and (game.headers.get('Date') == '????.??.??')
             and (len(list(game.mainline_moves())) == 0)):
-        logging.error('No PGN game found.')
+        raise ValueError('No PGN game found.')
 
     board = game.board()
     ratings = [get_rating_value(engine, board, depth_limit)]
@@ -219,7 +228,7 @@ def _analyze_game(engine: chess.engine.SimpleEngine, game: chess.pgn.Game,
     header = GAME_RATING_ANNOTATION_HEADER
     game.headers[header] = _annotation(ratings, depth_limit)
 
-def _write_atomically(path: str, contents: str) -> int:
+def _write_atomically(path: str, contents: str) -> None:
     """ Replace a file after a durable write while retaining its permissions. """
 
     directory = os.path.dirname(path)
@@ -241,16 +250,13 @@ def _write_atomically(path: str, contents: str) -> int:
             os.fsync(directory_descriptor)
         finally:
             os.close(directory_descriptor)
-    except Exception as error:
+    except Exception:
         if (os.path.exists(temporary_path)):
             os.unlink(temporary_path)
-        logging.exception('Failed to write file.', exc_info = error)
-        return 1
-
-    return 0
+        raise
 
 def _analyze_pgn_file(engine: chess.engine.SimpleEngine,
-        path: str, depth_limit: int) -> tuple[int, int]:
+        path: str, depth_limit: int) -> int:
     """ Analyze every game in one PGN file and return its game count. """
 
     games: list[chess.pgn.Game] = []
@@ -264,15 +270,11 @@ def _analyze_pgn_file(engine: chess.engine.SimpleEngine,
             games.append(game)
 
     if (len(games) == 0):
-        logging.error('No PGN games found.')
-        return 0, 1
+        raise ValueError('No PGN games found.')
 
     contents = '\n\n'.join(str(game).strip() for game in games) + '\n'
-    status = _write_atomically(path, contents)
-    if (status != 0):
-        return 0, 1
-
-    return len(games), 0
+    _write_atomically(path, contents)
+    return len(games)
 
 def _find_pgn_files() -> list[str]:
     """ Return mounted PGN files in deterministic recursive path order. """
@@ -306,8 +308,11 @@ def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
 
     for path in paths:
         relative_path = os.path.relpath(path, GAMES_DIR)
-        game_count, status = _analyze_pgn_file(engine, path, depth_limit)
-        if (status != 0):
+        try:
+            game_count = _analyze_pgn_file(engine, path, depth_limit)
+        except (OSError, ValueError, chess.engine.EngineError) as error:
+            logging.error('Could not analyze %s: %s', relative_path, error)
+
             summary['files_failed'] += 1
             failed_file: BatchFileFailure = {
                 'path': relative_path,
@@ -315,14 +320,15 @@ def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
                 'error': str(error),
             }
             summary['files'].append(failed_file)
-        else:
-            summary['files_succeeded'] += 1
-            successful_file: BatchFileSuccess = {
-                'path': relative_path,
-                'status': 'success',
-                'games_analyzed': game_count,
-            }
-            summary['files'].append(successful_file)
+            continue
+
+        summary['files_succeeded'] += 1
+        successful_file: BatchFileSuccess = {
+            'path': relative_path,
+            'status': 'success',
+            'games_analyzed': game_count,
+        }
+        summary['files'].append(successful_file)
 
     exit_code = 0
     if (summary['files_failed'] > 0):
@@ -351,7 +357,14 @@ def _get_parser() -> argparse.ArgumentParser:
     return parser
 
 def display_output(output: FenAnalysis | BatchAnalysis) -> None:
+    """ Write a machine-readable response to standard output. """
+
     print(json.dumps(output, sort_keys = True, indent = 4))
+
+def display_error(error: Exception) -> None:
+    """ Write one machine-readable error to standard output. """
+
+    print(json.dumps({'error': str(error)}))
 
 def main() -> int:
     """ Run the requested FEN or mounted-PGN analysis mode. """
@@ -361,38 +374,19 @@ def main() -> int:
         logging.error('--depth must be at least 1.')
         return 2
 
-    engine: chess.engine.SimpleEngine | None = None
     try:
-        engine = init_engine()
-    except Exception as error:
-        logging.exception('Failed to initialize engine.', exc_info = error)
+        with init_engine() as engine:
+            if (args.fen is not None):
+                display_output(analyze_fen(engine, args.fen, args.moves, args.depth))
+                return 0
 
-        if (engine is not None):
-            engine.quit()
-
+            output, exit_code = analyze_batch(engine, args.depth, args.allow_empty)
+            display_output(output)
+            return exit_code
+    except (OSError, ValueError, chess.engine.EngineError) as error:
+        logging.error('%s', error)
+        display_error(error)
         return 1
-
-    output: FenAnalysis | BatchAnalysis
-    try:
-        if (args.fen is not None):
-            (output, exit_code) = analyze_fen(engine, args.fen, args.moves, args.depth)
-        else:
-            (output, exit_code) = analyze_batch(engine, args.depth, args.allow_empty)
-    except Exception as error:
-        logging.exception('Failed to analyze moves.', exc_info = error)
-
-        if (engine is not None):
-            engine.quit()
-
-        return 1
-
-    if (engine is not None):
-        engine.quit()
-
-    if (output is not None):
-        display_output(output)
-
-    return exit_code
 
 if (__name__ == '__main__'):
     sys.exit(main())
