@@ -18,6 +18,8 @@ import chess
 import chess.engine
 import chess.pgn
 
+_logger = logging.getLogger(__name__)
+
 DEFAULT_DEPTH_LIMIT = 15
 GAMES_DIR = '/games'
 STOCKFISH_PATH = '/usr/bin/stockfish'
@@ -36,9 +38,10 @@ class AnalysisConfig(typing.TypedDict):
 class FenAnalysis(typing.TypedDict):
     """ The JSON response for a FEN analysis request. """
 
-    initial_fen: str
     config: AnalysisConfig
+    initial_fen: str
     initial_rating: Rating
+    moves: list[str]
     analysis_steps: list[Rating]
     final_rating: Rating
 
@@ -124,15 +127,16 @@ def get_rating_value(engine: chess.engine.SimpleEngine, board: chess.Board,
 def get_moveline_ratings(
         engine: chess.engine.SimpleEngine,
         board: chess.Board,
-        depth_limit: int, moves: str | None
-        ) -> list[Rating]:
+        depth_limit: int,
+        moves: str | None
+        ) -> tuple[list[Rating], list[str]]:
     """
     Parses a comma-separated string, updates the board position, and returns a move-by-move
     log of rating values.
     """
 
     if (moves is None):
-        return []
+        return [], []
 
     steps_history: list[Rating] = []
 
@@ -160,7 +164,7 @@ def get_moveline_ratings(
         step_evaluation = get_rating_value(engine, board, depth_limit)
         steps_history.append(step_evaluation)
 
-    return steps_history
+    return steps_history, move_list
 
 def analyze_fen(engine: chess.engine.SimpleEngine, fen: str, moves: str | None,
                 depth_limit: int) -> FenAnalysis:
@@ -169,17 +173,19 @@ def analyze_fen(engine: chess.engine.SimpleEngine, fen: str, moves: str | None,
     board = chess.Board(fen)
 
     output: FenAnalysis = {
-        'initial_fen': fen,
         'config': {'depth': depth_limit},
+        'initial_fen': fen,
         'initial_rating': 0.0,
+        'moves': [],
         'analysis_steps': [],
         'final_rating': 0.0,
     }
 
     output['initial_rating'] = get_rating_value(engine, board, depth_limit)
 
-    move_ratings = get_moveline_ratings(engine, board, depth_limit, moves)
+    move_ratings, moves = get_moveline_ratings(engine, board, depth_limit, moves)
     output['analysis_steps'] = move_ratings
+    output['moves'] = moves
 
     if ((len(move_ratings) > 0)
             and (not isinstance(move_ratings[-1], str)
@@ -311,7 +317,7 @@ def analyze_batch(engine: chess.engine.SimpleEngine, depth_limit: int,
         try:
             game_count = _analyze_pgn_file(engine, path, depth_limit)
         except (OSError, ValueError, chess.engine.EngineError) as error:
-            logging.error('Could not analyze %s: %s', relative_path, error)
+            _logger.exception("Failed to analyze '%s'.", relative_path)
 
             summary['files_failed'] += 1
             failed_file: BatchFileFailure = {
@@ -359,19 +365,14 @@ def _get_parser() -> argparse.ArgumentParser:
 def display_output(output: FenAnalysis | BatchAnalysis) -> None:
     """ Write a machine-readable response to standard output. """
 
-    print(json.dumps(output, sort_keys = True, indent = 4))
-
-def display_error(error: Exception) -> None:
-    """ Write one machine-readable error to standard output. """
-
-    print(json.dumps({'error': str(error)}))
+    print(json.dumps(output, indent = 4))
 
 def main() -> int:
     """ Run the requested FEN or mounted-PGN analysis mode. """
 
     args = _get_parser().parse_args()
     if (args.depth < 1):
-        logging.error('--depth must be at least 1.')
+        _logger.error('--depth must be at least 1.')
         return 2
 
     try:
@@ -383,9 +384,8 @@ def main() -> int:
             output, exit_code = analyze_batch(engine, args.depth, args.allow_empty)
             display_output(output)
             return exit_code
-    except (OSError, ValueError, chess.engine.EngineError) as error:
-        logging.error('%s', error)
-        display_error(error)
+    except (OSError, ValueError, chess.engine.EngineError):
+        _logger.exception('Failed to analyze chess games.')
         return 1
 
 if (__name__ == '__main__'):
