@@ -17,6 +17,7 @@ RUN apk add --no-cache --virtual .build-deps git make g++ curl \
     && make -j"$(nproc)" net \
     && make -j"$(nproc)" build ARCH="${STOCKFISH_ARCH}" \
     && cp /src/src/stockfish /usr/bin/stockfish \
+    && cp /src/Copying.txt /usr/bin/Copying.txt \
     && cd / && rm -rf /src \
     && apk del .build-deps
 
