@@ -2,7 +2,6 @@ FROM python:3.12-alpine3.20 AS builder
 
 ARG PYTHON_CHESS_VERSION=1.1
 ARG STOCKFISH_COMMIT=f8aa78e0a7e8853370e5989fc23783f3b244ac42
-ARG STOCKFISH_ARCH=x86-64
 ENV STOCKFISH_COMMIT=${STOCKFISH_COMMIT}
 
 # Build Stockfish, install it, then remove the source and the build tools.
@@ -14,8 +13,9 @@ RUN apk add --no-cache --virtual .build-deps git make g++ curl \
     && git fetch -q --depth 1 https://github.com/official-stockfish/Stockfish.git "${STOCKFISH_COMMIT}" \
     && git checkout -q FETCH_HEAD \
     && cd src/ \
+    && make -j"$(nproc)" clean \
+    && make -j"$(nproc)" build \
     && make -j"$(nproc)" net \
-    && make -j"$(nproc)" build ARCH="${STOCKFISH_ARCH}" \
     && cp /src/src/stockfish /usr/bin/stockfish \
     && cp /src/Copying.txt /usr/bin/Copying.txt \
     && cd / && rm -rf /src \
